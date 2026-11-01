@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как подключить WB Аналитику</title>
+<meta name="theme-color" content="#0b0b10"><link rel="icon" href="icon-192.png">
+<style>
+:root{--bg:#0b0b10;--fg:#f3f2f7;--muted:#9c98aa;--line:#262433;--accent:#c86bff;--accent-fg:#1b0626;--warn:#3a2c12;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(120% 40% at 50% -10%,#2a1640,transparent 60%) no-repeat,var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.w{max-width:720px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:26px;line-height:1.2;margin:8px 0 6px}h2{font-size:18px;margin:0 0 10px;display:flex;gap:10px;align-items:center}
+.n{flex:0 0 30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-weight:800;font-size:15px}
+.lead{color:var(--muted);margin:0 0 18px}
+.c{border:1px solid rgba(255,255,255,.07);border-radius:20px;background:linear-gradient(180deg,#1a1922,#121118);padding:16px;margin:14px 0}
+ol{margin:0;padding-left:22px}li{margin:6px 0}b{color:#fff}
+code,.k{font:600 14px ui-monospace,Menlo,monospace;background:#0e0d13;border:1px solid var(--line);border-radius:7px;padding:1px 6px;overflow-wrap:anywhere}
+.note{background:var(--warn);border-radius:14px;padding:10px 12px;font-size:14px;margin-top:10px}
+.btn{display:inline-block;border:0;border-radius:99px;padding:12px 18px;font:700 15px system-ui,sans-serif;background:var(--accent);color:var(--accent-fg);cursor:pointer;text-decoration:none;margin:8px 8px 0 0}
+.btn.s{background:#1d1c26;color:var(--fg);border:1px solid rgba(255,255,255,.1)}
+.m{color:var(--muted);font-size:14px}a{color:var(--accent)}
+dt{font-weight:700;margin-top:10px}dd{margin:2px 0 0;color:var(--muted)}
+</style></head><body><div class="w">
+<h1>Как подключить «WB Аналитику» к своему кабинету</h1>
+<p class="lead">Приложение показывает прибыль, выкуп, брак, логистику, ДРР (в том числе по рекламным кампаниям), остатки и налог по вашему кабинету Wildberries. Займёт 20–25 минут. Нужен компьютер (для таблицы) и телефон.</p>
+<div class="c m">Данные хранятся только в <b>вашей</b> Google Таблице. Ключ WB — только в вашем скрипте. Автор приложения ваши данные не видит: приложение на телефоне обращается напрямую к вашей таблице.</div>
+
+<div class="c"><h2><span class="n">1</span>Ключ API в кабинете WB</h2><ol>
+<li>Кабинет продавца → <b>Профиль → Настройки → Доступ к API</b> → «Создать новый токен».</li>
+<li>Тип: <b>Персональный</b>.</li>
+<li>Категории: <b>Статистика, Финансы, Продвижение, Аналитика, Контент</b>. Галочка <b>«Только на чтение»</b>.</li>
+<li>«Создать» → скопируйте ключ целиком и сохраните в заметку (WB показывает его один раз).</li></ol></div>
+
+<div class="c"><h2><span class="n">2</span>Таблица со скриптом (на компьютере)</h2><ol>
+<li>Откройте <a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a> — создастся пустая Google Таблица. Назовите её «WB Аналитика».</li>
+<li>Меню <b>Расширения → Apps Script</b>. Удалите весь текст в окне.</li>
+<li>Скопируйте код скрипта кнопкой ниже и вставьте в окно. Нажмите значок дискеты «Сохранить».<br>
+<button class="btn" id="cp">Скопировать код скрипта</button><a class="btn s" href="script.txt" target="_blank">Открыть код</a><span class="m" id="cpm"></span></li>
+<li>Вернитесь на вкладку таблицы и обновите страницу (F5). Справа от «Справки» появится меню <b>«WB Аналитика»</b>.</li>
+<li>«WB Аналитика» → <b>«1. Ввести ключ WB»</b>. Google попросит разрешение: «Предоставить доступ» → ваш аккаунт → «Дополнительные настройки» → «Перейти на страницу проекта (небезопасно)» → «Разрешить».
+<div class="note">Предупреждение «Google не проверил приложение» — обычное для своих скриптов. Скрипт работает только в вашей таблице.</div></li>
+<li>Снова «1. Ввести ключ WB» → вставьте ключ из шага 1 → ОК.</li>
+<li>«WB Аналитика» → <b>«2. Загрузить историю (90 дней)»</b>. Если в конце написано «Загружено не всё» — нажмите ещё раз, пока не будет «Готово».</li></ol></div>
+
+<div class="c"><h2><span class="n">3</span>Открыть доступ для приложения</h2><ol>
+<li>В окне Apps Script: <b>Начать развертывание → Новое развертывание</b>.</li>
+<li>Шестерёнка рядом с «Выберите тип» → <b>Веб-приложение</b>.</li>
+<li>«Запуск от имени»: <b>Я</b>. «У кого есть доступ»: <b>Все</b>. → «Развернуть».</li>
+<li>Скопируйте <b>URL веб-приложения</b> — он вида <code>https://script.google.com/macros/s/…/exec</code>.</li>
+<li>В таблице: «WB Аналитика» → <b>«Показать ключ доступа для приложения»</b> — перепишите ключ вида <code>xxxxx-xxxxx-xxxxx</code>.</li></ol>
+<p class="m" style="margin-top:8px">Отправьте себе адрес и ключ (например, в «Избранное» Telegram) — на телефоне их удобно скопировать.</p></div>
+
+<div class="c"><h2><span class="n">4</span>Приложение на телефоне</h2><ol>
+<li>Откройте в Chrome: <a href="./">happybeetlevova-ux.github.io/wb/</a></li>
+<li>«⋮» → <b>«Установить приложение»</b> (или «Добавить на главный экран»). На iPhone в Safari: «Поделиться» → «На экран Домой».</li>
+<li>Откройте приложение со значка → вкладка <b>«Ещё»</b> → вставьте адрес и ключ доступа → <b>«Проверить и сохранить»</b>.</li>
+<li>Там же, в «Ещё», укажите <b>свою ставку налога</b> (по умолчанию УСН «доходы» 7%) и <b>закуп</b> по товарам — без закупа прибыль будет завышена.</li></ol>
+<p class="m" style="margin-top:8px">Дальше всё обновляется само: заказы и остатки — каждый час, отчёты WB и реклама — каждую ночь.</p></div>
+
+<div class="c"><h2>Если что-то не так</h2><dl>
+<dt>«В ключе WB нет категории …»</dt><dd>Создайте новый ключ с категориями из шага 1 и введите через «1. Ввести ключ WB».</dd>
+<dt>«Метод работает только с ключом типа Персональный»</dt><dd>Ключ создан как «Базовый» — создайте «Персональный».</dd>
+<dt>«Ключ доступа не подходит»</dt><dd>Скопируйте его заново: меню таблицы «Показать ключ доступа для приложения».</dd>
+<dt>«Google ответил не данными»</dt><dd>При развертывании не выбрано «У кого есть доступ: Все», или скопирован адрес не того развертывания.</dd>
+<dt>Выручка за последние дни «предварительная»</dt><dd>Это нормально: WB выкладывает отчёт о реализации с задержкой, до него цифры берутся из оперативной статистики.</dd></dl></div>
+
+<div class="c"><h2>Обновление скрипта</h2><p class="m" style="margin:0">Когда выйдет новая версия: Apps Script → удалить старый код → вставить новый (кнопка выше) → «Сохранить» → <b>Начать развертывание → Управление развертываниями</b> → карандаш → Версия: «Новая версия» → «Развернуть». Адрес и ключ в приложении не меняются.</p></div>
+</div>
+<script>
+document.getElementById("cp").onclick=async()=>{const m=document.getElementById("cpm");try{const t=await (await fetch("script.txt",{cache:"no-cache"})).text();await navigator.clipboard.writeText(t);m.textContent=" Скопировано ✓"}catch(e){m.textContent=" Не получилось — нажмите «Открыть код», выделите всё (Ctrl+A) и скопируйте."}};
+</script></body></html>

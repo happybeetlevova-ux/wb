@@ -277,7 +277,8 @@ function moreHtml(){
   return `<div class="card"><h2>Подключение</h2>
    <label class="field"><span>${ON_SERVER?"Адрес вашего сервера":"Адрес веб-приложения Google"}</span><input id="s_url" class="inp" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(S.url||(ON_SERVER?location.origin+"/w/exec":""))}"></label>
    <label class="field"><span>Ключ доступа</span><input id="s_key" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xxxxx-xxxxx-xxxxx" value="${esc(S.key)}"><small>в таблице: меню «WB Аналитика» → «Показать ключ доступа»</small></label>
-   <div class="row2"><button type="button" class="btn main" data-act="connect">Проверить и сохранить</button></div></div>
+   <div class="row2"><button type="button" class="btn main" data-act="connect">Проверить и сохранить</button></div>
+   <p class="hint">Нет таблицы? <a href="help.html" target="_blank" style="color:var(--accent)">Инструкция по подключению своего кабинета</a></p></div>
   <div class="card"><h2>Налог</h2>
    <div class="row2"><label class="field"><span>Ставка УСН «доходы», %</span><input id="s_tax" class="inp" inputmode="decimal" value="${n1(S.tax*100,2)}"></label>
    <label class="field"><span>С какой суммы</span><select id="s_base" class="inp"><option value="retail" ${S.base!=="pay"?"selected":""}>Реализация (цена продажи)</option><option value="pay" ${S.base==="pay"?"selected":""}>К перечислению от WB</option></select></label></div>
