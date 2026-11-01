@@ -4,11 +4,12 @@
  *  - Заказы и продажи (статистика) — каждый час, за 14 дней.
  *  - Отчёты о реализации по дням: логистика, хранение, приёмка, штрафы, брак, выкуп — раз в сутки.
  *  - Реклама: расходы, показы, клики по каждому артикулу — раз в сутки.
- *  - Остатки на складах WB (FBO) и на своём складе (FBS) — каждый час.
+ *  - Остатки на складах WB (FBO) и на своём складе (FBS) — каждый час, по складам — из отчёта WB.
+ *  - География заказов (федеральные округа) и уведомления о заканчивающихся остатках.
  *  - Карточки товаров: название, артикул продавца, фото — раз в сутки.
  * Ключ WB хранится только в свойствах скрипта.
  */
-var VERSION = 3;
+var VERSION = 4;
 var TZ = 'Europe/Moscow';
 var H = {
   stat: 'https://statistics-api.wildberries.ru',
@@ -17,7 +18,9 @@ var H = {
   an: 'https://seller-analytics-api.wildberries.ru',
   content: 'https://content-api.wildberries.ru'
 };
-var SH = { days: 'Дни', goods: 'Товары', cost: 'Закуп', stock: 'Остатки', adc: 'Реклама', log: 'Журнал загрузок' };
+var SH = { days: 'Дни', goods: 'Товары', cost: 'Закуп', stock: 'Остатки', adc: 'Реклама', wh: 'Склады', geo: 'География заказов', log: 'Журнал загрузок' };
+var WCOL = ['Артикул WB', 'Склад', 'Остаток, шт', 'Обновлено'];
+var GCOL = ['Дата', 'Артикул WB', 'Федеральный округ', 'Склад (WB / свой)', 'Заказы, шт'];
 var ACOL = ['Дата', 'ID кампании', 'Кампания', 'Артикул WB', 'Расход, ₽', 'Показы', 'Клики', 'Заказы', 'Сумма заказов, ₽'];
 /* Колонки листа «Дни» */
 var DCOL = ['Дата', 'Артикул WB', 'Заказы, шт', 'Заказы, ₽', 'Отмены, шт', 'Продажи, шт', 'Продажи, ₽', 'Возвраты, шт', 'Возвраты, ₽', 'К перечислению (стат.), ₽',
@@ -40,6 +43,9 @@ function onOpen() {
     .addItem('Показать ключ доступа для приложения', 'menuShowKey')
     .addItem('Новый ключ доступа (старый перестанет работать)', 'menuResetKey')
     .addItem('Резервная копия таблицы в Google Диск', 'menuBackup')
+    .addSeparator()
+    .addItem('Уведомления: разрешить и проверить', 'menuAlertTest')
+    .addItem('Уведомления: Telegram-бот', 'menuTg')
     .addToUi();
 }
 
@@ -94,6 +100,8 @@ function ensureTriggers_() {
 function hourlyRun() {
   try { syncStat(14); setSetting_('errStat', ''); } catch (e) { setSetting_('errStat', e.message); }
   try { syncStocks(); setSetting_('errStock', ''); } catch (e) { setSetting_('errStock', e.message); }
+  try { syncWh(); setSetting_('errWh', ''); } catch (e) { setSetting_('errWh', e.message); }
+  try { alertCheck(); setSetting_('errAlert', ''); } catch (e) { setSetting_('errAlert', e.message); }
 }
 function dailyRun() {
   if (new Date().getDay() === 1) { try { backupRun(); } catch (e) { setSetting_('backupErr', e.message); } }
@@ -120,7 +128,7 @@ function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).se
 function ensureSheets_() {
   var ss = SpreadsheetApp.getActive();
   [[SH.days, DCOL], [SH.goods, ['Артикул WB', 'Артикул продавца', 'Название', 'Предмет', 'Бренд', 'Фото']], [SH.cost, ['Артикул WB', 'Артикул продавца', 'Название', 'Закуп за 1 шт, ₽']],
-   [SH.stock, ['Артикул WB', 'На складах WB (FBO), шт', 'На своём складе (FBS), шт', 'В пути к клиенту', 'В пути от клиента', 'Обновлено']], [SH.adc, ACOL]].forEach(function (x) {
+   [SH.stock, ['Артикул WB', 'На складах WB (FBO), шт', 'На своём складе (FBS), шт', 'В пути к клиенту', 'В пути от клиента', 'Обновлено']], [SH.adc, ACOL], [SH.wh, WCOL], [SH.geo, GCOL]].forEach(function (x) {
     var sh = ss.getSheetByName(x[0]);
     if (!sh) { sh = ss.insertSheet(x[0]); sh.getRange(1, 1, 1, x[1].length).setValues([x[1]]).setFontWeight('bold'); sh.setFrozenRows(1); }
   });
@@ -212,6 +220,50 @@ function statAgg(orders, sales, from) {
   });
   return Object.keys(out).map(function (k) { return out[k]; });
 }
+/** Заказы по дням × артикулам × округам × типу склада (без отмен). Чистая функция. */
+function geoAgg(orders, from) {
+  var out = {}, seen = {};
+  (orders || []).forEach(function (o) {
+    var d = String(o.date || '').slice(0, 10); if (!d || d < from || !o.nmId || o.isCancel) return;
+    var id = o.srid || (o.gNumber + '|' + o.date + '|' + o.barcode); if (seen[id]) return; seen[id] = 1;
+    var ok = String(o.oblastOkrugName || o.countryName || '').trim() || 'Не указан', t = /продав/i.test(String(o.warehouseType || '')) ? 'свой' : 'WB';
+    var k = d + '|' + o.nmId + '|' + ok + '|' + t;
+    (out[k] || (out[k] = { d: d, nm: Number(o.nmId), ok: ok, t: t, q: 0 })).q++;
+  });
+  return Object.keys(out).map(function (k) { return out[k]; });
+}
+function saveGeo_(agg, from) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH.geo), keep = daysAgo_(120), rows = [];
+  readGeo_().forEach(function (r) { if (r[0] < from && r[0] >= keep) rows.push(r); });
+  agg.forEach(function (x) { rows.push([x.d, x.nm, x.ok, x.t, x.q]); });
+  rows.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]; });
+  sh.getRange('A:A').setNumberFormat('@');
+  writeRows_(sh, GCOL, rows);
+}
+function readGeo_() {
+  return readRows_(SpreadsheetApp.getActive().getSheetByName(SH.geo)).map(function (r) {
+    return [r[0] instanceof Date ? day_(r[0]) : String(r[0]).slice(0, 10), Number(r[1]), String(r[2]), String(r[3]), num_(r[4])];
+  }).filter(function (r) { return r[0] && r[1]; });
+}
+/** Спрос в день по каждому артикулу за последние n дней: заказы без отмен, отдельно WB и свой склад. */
+function demand(geoRows, n, today) {
+  var from = daysAgoFrom_(today, n - 1), out = {};
+  geoRows.forEach(function (r) {
+    if (r[0] < from || r[0] > today) return;
+    var o = out[r[1]] || (out[r[1]] = { wb: 0, own: 0 });
+    if (r[3] === 'свой') o.own += r[4]; else o.wb += r[4];
+  });
+  Object.keys(out).forEach(function (k) { out[k].wb /= n; out[k].own /= n; });
+  return out;
+}
+function daysAgoFrom_(today, n) { return new Date(new Date(today + 'T12:00:00Z').getTime() - n * 86400000).toISOString().slice(0, 10); }
+/** Заказы по округам за период (nm — по одному артикулу). */
+function geoReport(geoRows, from, to, nm) {
+  var out = {};
+  geoRows.forEach(function (r) { if (r[0] < from || r[0] > to || (nm && r[1] !== nm)) return; out[r[2]] = (out[r[2]] || 0) + r[4]; });
+  return Object.keys(out).map(function (k) { return [k, out[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
+}
+
 function syncStat(days) {
   ensureSheets_();
   var from = daysAgo_(days);
@@ -225,6 +277,7 @@ function syncStat(days) {
     GROUPS.stat.forEach(function (f) { r[C[f]] = r2_(x[f]); });
   });
   saveDays_(map);
+  saveGeo_(geoAgg(orders, from), from);
   setSetting_('statAt', new Date().toISOString());
   return { orders: orders.length, sales: sales.length };
 }
@@ -408,6 +461,122 @@ function syncStocks() {
   return { fbo: fbo.length, fbs: fbs.length, err: err };
 }
 
+/* ================= остатки по складам (отчёт WB «Остатки на складах») ================= */
+/** WB с 14.08.2026 показывает отдельно только часть складов, остальное — «Склад WB РФ». Берём, что отдаёт. */
+function whAgg(items) {
+  var out = {};
+  (items || []).forEach(function (it) {
+    var nm = Number(it.nmId); if (!nm) return;
+    (it.warehouses || []).forEach(function (w) {
+      var n = String(w.warehouseName || '').trim(); if (!n || /^(В пути|Всего)/i.test(n)) return;
+      var k = nm + '|' + n; out[k] = out[k] || { nm: nm, wh: n, q: 0 }; out[k].q += num_(w.quantity);
+    });
+  });
+  return Object.keys(out).map(function (k) { return out[k]; }).filter(function (x) { return x.q > 0; });
+}
+function syncWh() {
+  ensureSheets_();
+  var id = setting_('whTask'), done = false;
+  if (!id) {
+    var t = wb_('an', '/api/v1/warehouse_remains?locale=ru&groupByNm=true') || {};
+    id = String((t.data && (t.data.taskId || t.data.id)) || '');
+    if (!id) throw new Error('WB не создал отчёт об остатках по складам.');
+    setSetting_('whTask', id);
+  }
+  for (var i = 0; i < 10; i++) {
+    Utilities.sleep(i ? 6000 : 4000);
+    var st = wb_('an', '/api/v1/warehouse_remains/tasks/' + id + '/status') || {}, s = st.data && st.data.status;
+    if (s === 'done') { done = true; break; }
+    if (s === 'canceled' || s === 'purged') { setSetting_('whTask', ''); throw new Error('WB отменил отчёт по складам, повторим через час.'); }
+  }
+  if (!done) return { pending: true };
+  Utilities.sleep(2000);
+  var rows = wb_('an', '/api/v1/warehouse_remains/tasks/' + id + '/download') || [];
+  setSetting_('whTask', '');
+  var now = Utilities.formatDate(new Date(), TZ, 'dd.MM HH:mm');
+  writeRows_(SpreadsheetApp.getActive().getSheetByName(SH.wh), WCOL, whAgg(rows).sort(function (a, b) { return a.nm - b.nm || b.q - a.q; }).map(function (x) { return [x.nm, x.wh, x.q, now]; }));
+  setSetting_('whAt', new Date().toISOString());
+  return { rows: rows.length };
+}
+
+/* ================= уведомления ================= */
+function alertCfg_() {
+  return { days: Number(setting_('alertDays') || 7), mail: setting_('alertMail') !== '0', email: setting_('alertEmail'),
+    tg: !!(setting_('tgToken') && setting_('tgChat')), tgToken: !!setting_('tgToken'), off: setting_('alertOff') === '1' };
+}
+function alertOut_() { var c = alertCfg_(); c.email = c.email || ownerEmail_(); return c; }
+function ownerEmail_() { try { return Session.getEffectiveUser().getEmail() || ''; } catch (e) { return ''; } }
+/** Какие артикулы в «опасной зоне» по FBO. Чистая функция. level: 2 — закончился, 1 — меньше порога дней. */
+function stockAlerts(stockRows, dem, goods, days) {
+  var out = [];
+  stockRows.forEach(function (r) {
+    var nm = Number(r[0]), fbo = num_(r[1]), d = dem[nm] || { wb: 0 }, g = goods[nm] || {};
+    if (!nm || d.wb * 14 < 2) return; /* редкие товары (меньше 2 заказов за 2 недели) не тревожим */
+    var left = fbo / d.wb, level = fbo <= 0 ? 2 : left < days ? 1 : 0;
+    if (level) out.push({ nm: nm, fbo: fbo, perDay: Math.round(d.wb * 10) / 10, left: Math.floor(left), level: level, title: g.title || '', art: g.art || '' });
+  });
+  return out.sort(function (a, b) { return a.left - b.left; });
+}
+function alertText_(list, head) {
+  return (head || '⚠️ WB Аналитика: заканчиваются остатки на складах WB') + '\n\n' + list.map(function (x) {
+    var name = (x.title || 'Арт. ' + x.nm) + (x.art ? ' (' + x.art + ')' : '');
+    return (x.level === 2 ? '🔴 ' : '🟡 ') + name + '\n   ' + (x.level === 2 ? 'закончился на складах WB' : 'осталось ' + x.fbo + ' шт — хватит на ' + x.left + ' дн.') + ', заказывают ≈' + x.perDay + ' шт/день';
+  }).join('\n') + '\n\nПриложение: https://happybeetlevova-ux.github.io/wb/';
+}
+function send_(text, subject) {
+  var c = alertCfg_(), sent = [], err = [];
+  if (c.mail) { try { var to = c.email || ownerEmail_(); if (to) { MailApp.sendEmail(to, subject || 'WB Аналитика: остатки', text); sent.push('почта ' + to); } }
+    catch (e) { err.push('почта: ' + (/permission|разрешени|authoriz/i.test(e.message) ? 'нужно разрешение — откройте таблицу → меню «WB Аналитика» → «Уведомления: разрешить и проверить»' : e.message)); } }
+  if (c.tg) { try { tgSend_(text); sent.push('Telegram'); } catch (e) { err.push('Telegram: ' + e.message); } }
+  if (!sent.length && err.length) throw new Error(err.join('; '));
+  return { sent: sent, err: err };
+}
+function tgSend_(text) {
+  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + setting_('tgToken') + '/sendMessage', { method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ chat_id: setting_('tgChat'), text: text, disable_web_page_preview: true }), muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('бот не отправил сообщение (' + r.getResponseCode() + '). Проверьте токен и напишите боту.');
+}
+/** Находит чат: последнее сообщение, которое пользователь написал боту. */
+function tgFind_() {
+  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + setting_('tgToken') + '/getUpdates', { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('Telegram не принял токен. Скопируйте его у @BotFather заново.');
+  var res = (JSON.parse(r.getContentText()).result || []).filter(function (u) { return u.message && u.message.chat; });
+  if (!res.length) throw new Error('Бот ещё не получил от вас сообщений. Откройте бота в Telegram, нажмите «Старт» или напишите любое слово — и повторите.');
+  var ch = res[res.length - 1].message.chat;
+  setSetting_('tgChat', String(ch.id));
+  tgSend_('✅ WB Аналитика подключена. Сюда будут приходить уведомления о заканчивающихся остатках.');
+  return ch.first_name || ch.title || ch.username || String(ch.id);
+}
+function alertState_() { try { return JSON.parse(setting_('alertState') || '{}'); } catch (e) { return {}; } }
+function alertCheck(force) {
+  var c = alertCfg_(); if (c.off && !force) return { off: true };
+  var ss = SpreadsheetApp.getActive(), goods = {};
+  readRows_(ss.getSheetByName(SH.goods)).forEach(function (r) { goods[Number(r[0])] = { art: r[1], title: r[2] }; });
+  var list = stockAlerts(readRows_(ss.getSheetByName(SH.stock)), demand(readGeo_(), 14, day_(new Date())), goods, c.days);
+  var st = alertState_(), now = {}, fresh = [];
+  list.forEach(function (x) { now[x.nm] = x.level; if (force || (st[x.nm] || 0) < x.level) fresh.push(x); });
+  setSetting_('alertState', JSON.stringify(now));
+  if (!fresh.length) return { sent: [], count: 0, total: list.length };
+  var r = send_(alertText_(fresh), 'WB Аналитика: заканчиваются остатки (' + fresh.length + ')');
+  setSetting_('alertAt', new Date().toISOString());
+  return { sent: r.sent, count: fresh.length, total: list.length };
+}
+function menuAlertTest() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var r = alertCheck(true);
+    if (!r.count) { send_('✅ WB Аналитика: проверка уведомлений. Сейчас остатков, которые заканчиваются, нет (порог — ' + alertCfg_().days + ' дн.).', 'WB Аналитика: проверка уведомлений'); }
+    ui.alert('Уведомления работают.' + (r.count ? ' Отправлено товаров: ' + r.count + '.' : ' Отправлено проверочное сообщение.') + '\nКуда: ' + (alertCfg_().mail ? 'почта ' + (alertCfg_().email || ownerEmail_()) : '') + (alertCfg_().tg ? ', Telegram' : ''));
+  } catch (e) { ui.alert('Не получилось: ' + e.message); }
+}
+function menuTg() {
+  var ui = SpreadsheetApp.getUi();
+  var r = ui.prompt('Telegram-бот', '1) В Telegram откройте @BotFather → /newbot → придумайте имя → скопируйте токен.\n2) Вставьте токен сюда.\n3) Откройте своего бота, нажмите «Старт» — и только потом ОК.\n\n(Оставьте пустым, чтобы проверить уже введённый токен.)', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  var t = String(r.getResponseText() || '').trim(); if (t) { setSetting_('tgToken', t); setSetting_('tgChat', ''); }
+  try { ui.alert('Готово: бот пишет в чат «' + tgFind_() + '». Проверьте Telegram.'); } catch (e) { ui.alert(e.message); }
+}
+
 /* ================= карточки товаров ================= */
 function syncCards() {
   ensureSheets_();
@@ -532,13 +701,20 @@ function doGet(e) {
       }
       var adc = readRows_(ss.getSheetByName(SH.adc));
       rep.campaigns = campReport(adc, from, to);
-      /* средние продажи за 30 дней — для оборачиваемости остатков */
-      var r30 = buildReport(rows, [], {}, [], daysAgo_(30), day_(new Date()), { tax: 0, finLast: setting_('finLast') }), avg = {};
-      r30.items.forEach(function (o) { avg[o.nm] = Math.max(0, o.netQ) / 30; });
-      rep.items.forEach(function (o) { o.perDay = r2_(avg[o.nm] || 0); });
+      /* спрос в день — по заказам без отмен за 14 дней (раздельно WB и свой склад); без географии — по продажам за 30 дней */
+      var geo = readGeo_(), avg = {};
+      if (geo.length) { var dm = demand(geo, 14, day_(new Date())); Object.keys(dm).forEach(function (k) { avg[k] = dm[k]; }); }
+      else buildReport(rows, [], {}, [], daysAgo_(30), day_(new Date()), { tax: 0, finLast: setting_('finLast') }).items.forEach(function (o) { avg[o.nm] = { wb: Math.max(0, o.netQ) / 30, own: 0 }; });
+      rep.demandBy = geo.length ? 'orders14' : 'sales30';
+      rep.items.forEach(function (o) { var a = avg[o.nm] || { wb: 0, own: 0 }; o.perDayWb = r2_(a.wb); o.perDayOwn = r2_(a.own); o.perDay = r2_(a.wb + a.own); });
+      var wh = {}, whT = {};
+      readRows_(ss.getSheetByName(SH.wh)).forEach(function (r) { var nm = Number(r[0]), q = num_(r[2]), n = String(r[1]); if (!nm || !q) return; (wh[nm] = wh[nm] || []).push([n, q]); whT[n] = (whT[n] || 0) + q; });
+      rep.wh = wh; rep.whTotal = Object.keys(whT).map(function (k) { return [k, whT[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
+      rep.geo = geoReport(geo, from, to);
+      rep.alerts = alertOut_();
       rep.ok = true;
       rep.status = { statAt: setting_('statAt'), finAt: setting_('finAt'), finLast: setting_('finLast'), adsAt: setting_('adsAt'), stockAt: setting_('stockAt'),
-        errStat: setting_('errStat'), errFin: setting_('errFin'), errAds: setting_('errAds'), errStock: setting_('errStock') || setting_('stockErr'), finMode: setting_('finMode') || 'daily' };
+        errStat: setting_('errStat'), errFin: setting_('errFin'), errAds: setting_('errAds'), errStock: setting_('errStock') || setting_('stockErr'), errWh: setting_('errWh'), errAlert: setting_('errAlert'), whAt: setting_('whAt'), alertAt: setting_('alertAt'), finMode: setting_('finMode') || 'daily' };
       return json_(rep);
     }
     if (p.action === 'item') {
@@ -548,7 +724,7 @@ function doGet(e) {
       ir.days.forEach(function (x) { byD[x.d] = x; });
       return json_({ ok: true, nm: nm, from: f2, to: t2,
         days: dayList_(f2, t2).map(function (d) { return byD[d] || { d: d, ordSum: 0, revenue: 0, ads: 0, ordQ: 0, netQ: 0, profit: 0 }; }),
-        campaigns: campReport(readRows_(SpreadsheetApp.getActive().getSheetByName(SH.adc)), f2, t2, nm) });
+        campaigns: campReport(readRows_(SpreadsheetApp.getActive().getSheetByName(SH.adc)), f2, t2, nm), geo: geoReport(readGeo_(), f2, t2, nm) });
     }
     return json_({ ok: false, error: 'Неизвестное действие' });
   } catch (err) { return json_({ ok: false, error: err.message }); }
@@ -571,6 +747,22 @@ function doPost(e) {
       });
       writeRows_(sh, ['Артикул WB', 'Артикул продавца', 'Название', 'Закуп за 1 шт, ₽'], rows);
       return json_({ ok: true });
+    }
+    if (b.action === 'alerts') {
+      if (b.days != null) { var dd = Math.round(num_(b.days)); if (dd < 1 || dd > 90) return json_({ ok: false, error: 'Порог — от 1 до 90 дней.' }); setSetting_('alertDays', dd); }
+      if (b.mail != null) setSetting_('alertMail', b.mail ? '1' : '0');
+      if (b.email != null) { var em = String(b.email).trim(); if (em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return json_({ ok: false, error: 'Проверьте адрес почты.' }); setSetting_('alertEmail', em); }
+      if (b.off != null) setSetting_('alertOff', b.off ? '1' : '0');
+      if (b.tgToken != null) { setSetting_('tgToken', String(b.tgToken).trim()); setSetting_('tgChat', ''); }
+      if (b.tgOff) { setSetting_('tgToken', ''); setSetting_('tgChat', ''); }
+      setSetting_('alertState', '{}');
+      return json_({ ok: true, alerts: alertOut_() });
+    }
+    if (b.action === 'tgFind') return json_({ ok: true, name: tgFind_(), alerts: alertOut_() });
+    if (b.action === 'alertTest') {
+      var rr = alertCheck(true);
+      if (!rr.count) rr.sent = send_('✅ WB Аналитика: проверка уведомлений. Сейчас заканчивающихся остатков нет (порог — ' + alertCfg_().days + ' дн.).', 'WB Аналитика: проверка уведомлений').sent;
+      return json_({ ok: true, res: rr });
     }
     return json_({ ok: false, error: 'Неизвестное действие' });
   } catch (err) { return json_({ ok: false, error: err.message }); }

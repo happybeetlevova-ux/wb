@@ -56,6 +56,9 @@ main{padding-block:6px calc(110px + env(safe-area-inset-bottom));display:flex;fl
 .info{min-width:0;display:flex;flex-direction:column;gap:2px}.info b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .info small{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .num{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}.num b{font:700 15px var(--f-n);white-space:nowrap}.num small{font:600 12px var(--f-n);white-space:nowrap}
+.bar i{display:block;height:6px;border-radius:3px;background:var(--c4);margin-top:3px}.warnc{border-color:color-mix(in srgb,var(--warn) 45%,transparent)}.lnb{border:0;background:none;color:inherit;text-align:left;padding:4px 0;width:100%;font:inherit}
+.chk{display:flex;gap:10px;align-items:center;font-weight:600}.chk input{width:20px;height:20px;accent-color:var(--accent)}
+code{font:600 12px var(--f-n);background:#0e0d13;border-radius:6px;padding:1px 5px}
 .pos{color:var(--ok)}.neg{color:var(--bad)}.mid{color:var(--warn)}
 .t{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
 .t th{color:var(--muted);font-weight:600;text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}
@@ -139,17 +142,19 @@ async function load(){
 function m(o){
   const buy=o.dlv>=1?div(o.dlv-o.back,o.dlv):div(o.saleQ,o.ordQ-o.cancQ);
   return {buy,drrO:div(o.adSum,o.ordSum),drrS:div(o.adSum,o.revenue),margin:div(o.profit,o.revenue),logPer:div(o.log,o.netQ),wb:o.revenue-o.pay,
-    otherAll:o.stor+o.acc+o.pen+o.other,stock:o.fbo+o.fbs,days:o.perDay>0?(o.fbo+o.fbs)/o.perDay:NaN,roi:div(o.profit,o.costSum)};
+    otherAll:o.stor+o.acc+o.pen+o.other,stock:o.fbo+o.fbs,days:o.perDay>0?(o.fbo+o.fbs)/o.perDay:NaN,roi:div(o.profit,o.costSum),
+    dWb:o.perDayWb!=null?(o.perDayWb>0?o.fbo/o.perDayWb:NaN):(o.perDay>0?o.fbo/o.perDay:NaN),dOwn:o.perDayOwn>0?o.fbs/o.perDayOwn:NaN};
 }
 /* сравнение с прошлым периодом той же длины: inv — рост плохо (расходы) */
 const PV=()=>R&&R.prev&&!R.prev.partial?R.prev:null;
 function dl(cur,prev,inv){if(prev==null||!isFinite(prev)||!isFinite(cur))return "";if(!prev)return cur?`<em class="dl z" title="в прошлом периоде было 0">новое</em>`:"";
   const ch=(cur-prev)/Math.abs(prev);if(Math.abs(ch)<0.005)return `<em class="dl z">0%</em>`;const good=inv?ch<0:ch>0;
+  if(Math.abs(ch)>5)return `<em class="dl ${good?"up":"down"}" title="прошлый период: ${n1(prev,0)}">${ch>0?"▲":"▼"}>500%</em>`;
   return `<em class="dl ${good?"up":"down"}" title="прошлый период: ${n1(prev,0)}">${ch>0?"▲":"▼"}${n1(Math.abs(ch)*100,Math.abs(ch)<0.1?1:0)}%</em>`}
 function dt(f,inv){const p=PV();return p?dl(R.total[f],p.total[f],inv):""}
 function kpi(t,v,s,cls,act,d){return `<${act?"button type=button data-go="+act:"div"} class="kpi ${cls||""}"><span>${t}</span><b>${v}${d||""}</b>${s?`<small>${s}</small>`:""}</${act?"button":"div"}>`}
 function status(){
-  if(!R||!R.status)return "";const st=R.status,er=[st.errStat&&"Заказы: "+st.errStat,st.errFin&&"Отчёты: "+st.errFin,st.errAds&&"Реклама: "+st.errAds,st.errStock&&"Остатки: "+st.errStock].filter(Boolean);
+  if(!R||!R.status)return "";const st=R.status,er=[st.errStat&&"Заказы: "+st.errStat,st.errFin&&"Отчёты: "+st.errFin,st.errAds&&"Реклама: "+st.errAds,st.errStock&&"Остатки: "+st.errStock,st.errWh&&"Остатки по складам: "+st.errWh,st.errAlert&&"Уведомления: "+st.errAlert].filter(Boolean);
   const est=R.estDays&&R.estDays.length?`<div class="banner">За ${R.estDays.length} дн. (с ${ddmm(R.estDays[0])}) отчёта WB ещё нет: выручка и «к перечислению» взяты из оперативной статистики, логистика и хранение появятся с отчётом. Итог за эти дни предварительный.</div>`:"";
   return est+(er.length?`<div class="banner bad">${er.map(esc).join("<br>")}</div>`:"");
 }
@@ -235,8 +240,10 @@ function xlsxBook(X){
   add("Товары",[["Артикул WB","Артикул продавца","Название","Заказы, шт","Заказы, ₽","Отмены","Продажи, шт","Возвраты","Брак","Выкуп, %","Выручка, ₽","Выручка прошл., ₽","Изм. выручки, %","К перечислению, ₽","Логистика, ₽","Хранение, приёмка, штрафы, удерж., ₽","Реклама, ₽","ДРР от заказов, %","Налог, ₽","Закуп 1 шт, ₽","Закуп, ₽","Прибыль, ₽","Маржа, %","Прибыль на 1 шт, ₽","Остаток FBO","Остаток FBS"]]
    .concat(L.map(o=>{const y=m(o),pv=P&&P.items[o.nm];return [o.nm||"без артикула",o.art,o.title,o.ordQ,r2(o.ordSum),o.cancQ,o.netQ,o.retQ,o.brakQ,p1(y.buy),r2(o.revenue),P?r2(pv?pv.revenue:0):"",pv?ch(o.revenue,pv.revenue):"",r2(o.pay),r2(o.log),r2(y.otherAll),r2(o.adSum),p1(y.drrO),r2(o.tax),o.cost||"",r2(o.costSum),r2(o.profit),p1(y.margin),o.netQ>0?r2(o.profit/o.netQ):"",o.fbo,o.fbs]})),
    [12,14,34,9,11,8,10,9,7,9,12,12,10,12,11,14,11,10,10,10,11,12,9,11,9,9]);
-  add("Остатки",[["Артикул WB","Артикул продавца","Название","FBO, шт","FBS, шт","В пути к клиенту","В пути от клиента","Продаж в день (30 дн.)","Хватит, дней","Закуп остатка, ₽"]]
-   .concat(R.items.filter(o=>o.nm&&(o.fbo||o.fbs||o.perDay)).map(o=>{const y=m(o);return [o.nm,o.art,o.title,o.fbo,o.fbs,o.toCl,o.fromCl,o.perDay,isFinite(y.days)?Math.round(y.days):"",o.cost?r2(o.cost*(o.fbo+o.fbs)):""]})),[12,14,34,9,9,10,10,12,10,12]);
+  add("Остатки",[["Артикул WB","Артикул продавца","Название","FBO, шт","FBS, шт","В пути к клиенту","В пути от клиента","Заказов в день WB","Заказов в день FBS","Хватит FBO, дней","Хватит FBS, дней","Закуп остатка, ₽"]]
+   .concat(R.items.filter(o=>o.nm&&(o.fbo||o.fbs||o.perDay)).map(o=>{const y=m(o);return [o.nm,o.art,o.title,o.fbo,o.fbs,o.toCl,o.fromCl,o.perDayWb!=null?o.perDayWb:o.perDay,o.perDayOwn||0,isFinite(y.dWb)?Math.floor(y.dWb):"",isFinite(y.dOwn)?Math.floor(y.dOwn):"",o.cost?r2(o.cost*(o.fbo+o.fbs)):""]})),[12,14,34,9,9,10,10,11,11,11,11,12]);
+  if(R.wh)add("По складам",[["Артикул WB","Артикул продавца","Название","Склад","Остаток, шт"]].concat(Object.keys(R.wh).flatMap(nm=>{const o=R.items.find(x=>x.nm===+nm)||{};return R.wh[nm].map(w=>[+nm,o.art||"",o.title||"",w[0],w[1]])})),[12,14,34,22,10]);
+  if(R.geo&&R.geo.length)add("Откуда заказывают",[["Федеральный округ","Заказы, шт"]].concat(R.geo),[34,12]);
   add("Реклама",[["ID кампании","Кампания","Расход, ₽","Показы","Клики","CTR, %","Цена клика, ₽","Заказы","Сумма заказов, ₽","ДРР, %","Цена заказа, ₽","Артикулы"]]
    .concat((R.campaigns||[]).map(c=>{const y=cm(c);return [c.id,cName(c),r2(c.sum),c.views,c.clicks,p1(y.ctr),r2(y.cpc),c.orders,r2(c.sumPrice),p1(y.drr),r2(y.cpo),(c.nms||[]).join(", ")]})),[12,30,11,10,8,7,10,8,13,8,11,30]);
   add("По дням",[["Дата","Заказы, шт","Заказы, ₽","Продажи, шт","Выручка, ₽","Реклама, ₽","Прибыль (оценка), ₽"]].concat(R.days.map(d=>[d.d,d.ordQ,r2(d.ordSum),d.netQ,r2(d.revenue),r2(d.ads),r2(d.profit)])),[12,10,12,10,12,11,14]);
@@ -264,25 +271,37 @@ function goodsHtml(){
   ${z&&(z.stor||z.pen||z.other||z.log)?`<div class="card"><h2>Расходы без артикула <small>${rub(z.stor+z.pen+z.other+z.log+z.acc)}</small></h2><div class="lines"><div class="ln"><span>Хранение</span><span>${rub(z.stor)}</span></div><div class="ln"><span>Логистика</span><span>${rub(z.log)}</span></div><div class="ln"><span>Штрафы</span><span>${rub(z.pen)}</span></div><div class="ln"><span>Прочие удержания</span><span>${rub(z.other+z.acc)}</span></div></div><p class="hint">WB списывает их на весь кабинет. Они учтены в общей прибыли на «Сводке».</p></div>`:""}
   <p class="hint">Цифра справа: выручка${PV()?" (▲▼ — к прошлому периоду)":""}, ниже прибыль и маржа. Нажмите на товар — график по дням, разбор и закуп.</p>`;
 }
+const AD=()=>R&&R.alerts&&R.alerts.days||7;
+const dCls=d=>!isFinite(d)?"":d<AD()?"neg":d<AD()*2?"mid":"";
+const dTxt=d=>isFinite(d)?n1(Math.floor(d),0)+" дн.":"—";
+function crit(){return R.items.filter(o=>o.nm&&(o.perDayWb!=null?o.perDayWb:o.perDay)*14>=2).map(o=>({o,x:m(o)})).filter(({o,x})=>o.fbo<=0||x.dWb<AD()).sort((a,b)=>(a.o.fbo>0?a.x.dWb:-1)-(b.o.fbo>0?b.x.dWb:-1))}
+function bars(L,tot,fmt){return `<div class="lines">${L.map(([k,v])=>`<div class="bar"><div class="ln"><span>${esc(k)}</span><span>${fmt(v)}</span></div><i style="width:${Math.max(2,v/tot*100)}%"></i></div>`).join("")}</div>`}
 function stockHtml(){
   if(!R)return sumHtml();
-  const L=R.items.filter(o=>o.nm&&(o.fbo||o.fbs||o.perDay)).map(o=>({o,x:m(o)})).sort((a,b)=>(isFinite(a.x.days)?a.x.days:1e9)-(isFinite(b.x.days)?b.x.days:1e9));
-  const t=R.total;
-  return `<div class="grid">${kpi("Всего",`${n1(t.fbo+t.fbs,0)} шт`,`в закупе ${rub(t.stockCost)}`)}${kpi("Склады WB (FBO)",`${n1(t.fbo,0)} шт`,`в пути к клиенту ${n1(t.toCl,0)}`)}${kpi("Свой склад (FBS)",`${n1(t.fbs,0)} шт`,`возвращается ${n1(t.fromCl,0)}`)}${kpi("Закончится раньше всех",L[0]&&isFinite(L[0].x.days)?`${n1(L[0].x.days,0)} дн.`:"—",L[0]?esc(L[0].o.title||L[0].o.nm):"")}</div>
-  <div class="card"><h2>По товарам <small>хватит на — по продажам за 30 дней</small></h2><div class="scroll"><table class="t"><thead><tr><th>Товар</th><th>FBO</th><th>FBS</th><th>В день</th><th>Хватит</th></tr></thead><tbody>
-  ${L.map(({o,x})=>`<tr data-nm="${o.nm}"><td>${esc(o.title||o.nm)}<br><small class="hint">${esc(o.art||"")}${o.cost?" · "+rub(o.cost*(o.fbo+o.fbs)):""}</small></td><td>${n1(o.fbo,0)}</td><td>${n1(o.fbs,0)}</td><td>${n1(o.perDay,1)}</td><td class="${x.days<7?"neg":x.days<14?"mid":""}">${isFinite(x.days)?n1(x.days,0)+" дн.":"—"}</td></tr>`).join("")}</tbody></table></div>
-  <p class="hint">Красным — меньше недели, жёлтым — меньше двух. Остатки обновляются каждый час${R.status&&R.status.stockAt?", последний раз "+new Date(R.status.stockAt).toLocaleString("ru-RU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}.</p></div>`;
+  const L=R.items.filter(o=>o.nm&&(o.fbo||o.fbs||o.perDay)).map(o=>({o,x:m(o)})).sort((a,b)=>(isFinite(a.x.dWb)?a.x.dWb:1e9)-(isFinite(b.x.dWb)?b.x.dWb:1e9));
+  const t=R.total,C=crit(),A=R.alerts,W=R.whTotal||[],G=R.geo||[],wt=W.reduce((a,x)=>a+x[1],0),gt=G.reduce((a,x)=>a+x[1],0);
+  const ord14=R.demandBy==="orders14";
+  return `${C.length?`<div class="card warnc"><h2>Заканчиваются на складах WB <small>меньше ${AD()} дн.</small></h2><div class="lines">${C.map(({o,x})=>`<button type="button" class="ln lnb" data-nm="${o.nm}"><span>${o.fbo>0?"🟡":"🔴"} ${esc(o.title||o.nm)}<br><small class="hint">${esc(o.art||"")} · заказывают ${n1(o.perDayWb!=null?o.perDayWb:o.perDay,1)} шт/день</small></span><span class="${o.fbo>0?"mid":"neg"}">${o.fbo>0?`${n1(o.fbo,0)} шт · ${dTxt(x.dWb)}`:"закончился"}</span></button>`).join("")}</div>
+   ${A?`<p class="hint">${A.off?"Уведомления выключены.":A.tg||A.mail?`Уведомления приходят ${[A.tg&&"в Telegram",A.mail&&"на почту"].filter(Boolean).join(" и ")}.`:"Уведомления никуда не отправляются."} <button type="button" class="chip" data-act="alerts">Настроить</button></p>`:""}</div>`:""}
+  <div class="grid">${kpi("Всего",`${n1(t.fbo+t.fbs,0)} шт`,`в закупе ${rub(t.stockCost)}`)}${kpi("Склады WB (FBO)",`${n1(t.fbo,0)} шт`,`в пути к клиенту ${n1(t.toCl,0)}`)}${kpi("Свой склад (FBS)",`${n1(t.fbs,0)} шт`,`возвращается ${n1(t.fromCl,0)}`)}${kpi("Заканчиваются",`${C.length} арт.`,C.length?`быстрее всех: ${esc((C[0].o.title||String(C[0].o.nm)).slice(0,28))}`:`запаса больше ${AD()} дн.`,C.length?"bad":"ok")}</div>
+  <div class="card"><h2>По товарам <small>хватит на — по ${ord14?"заказам за 14 дней":"продажам за 30 дней"}</small></h2><div class="scroll"><table class="t"><thead><tr><th>Товар</th><th>FBO</th><th>FBS</th><th>В день</th><th>Хватит FBO</th></tr></thead><tbody>
+  ${L.map(({o,x})=>`<tr data-nm="${o.nm}"><td>${esc(o.title||o.nm)}<br><small class="hint">${esc(o.art||"")}${o.cost?" · "+rub(o.cost*(o.fbo+o.fbs)):""}</small></td><td>${n1(o.fbo,0)}</td><td>${n1(o.fbs,0)}${o.fbs&&isFinite(x.dOwn)?`<br><small class="${dCls(x.dOwn)}">${dTxt(x.dOwn)}</small>`:""}</td><td>${n1(o.perDayWb!=null?o.perDayWb:o.perDay,1)}${o.perDayOwn?`<br><small class="hint">+${n1(o.perDayOwn,1)} FBS</small>`:""}</td><td class="${o.fbo<=0&&(o.perDayWb||0)>0?"neg":dCls(x.dWb)}">${o.fbo<=0&&(o.perDayWb||0)>0?"0":dTxt(x.dWb)}</td></tr>`).join("")}</tbody></table></div>
+  <p class="hint">«В день» — ${ord14?"заказы без отмен за 14 дней, отдельно для складов WB и своего склада":"продажи за 30 дней"}. Красным — меньше ${AD()} дн., жёлтым — меньше ${AD()*2}. Остатки обновляются каждый час${R.status&&R.status.stockAt?", последний раз "+new Date(R.status.stockAt).toLocaleString("ru-RU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}.</p></div>
+  <div class="card"><h2>По складам WB <small>${n1(wt,0)} шт</small></h2>${W.length?bars(W,W[0][1],v=>n1(v,0)+" шт · "+pct(v/wt,0)):`<p class="hint">Разбивка появится после ближайшего часового обновления (нужен скрипт таблицы версии 4).</p>`}
+   <p class="hint">С 14 августа 2026 WB не показывает продавцам большинство складов: их остатки собраны в строку «Склад WB РФ». Отдельно WB ещё показывает несколько складов (например, Электросталь, Краснодар, СПб Шушары, Тула) и зарубежные.</p></div>
+  ${G.length?`<div class="card"><h2>Откуда заказывают <small>${ddmm(R.from)}–${ddmm(R.to)} · ${n1(gt,0)} шт</small></h2>${bars(G,G[0][1],v=>n1(v,0)+" · "+pct(v/gt,0))}<p class="hint">Федеральные округа покупателей по заказам без отмен.</p></div>`:""}`;
 }
 function moreHtml(){
   return `<div class="card"><h2>Подключение</h2>
    <label class="field"><span>${ON_SERVER?"Адрес вашего сервера":"Адрес веб-приложения Google"}</span><input id="s_url" class="inp" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(S.url||(ON_SERVER?location.origin+"/w/exec":""))}"></label>
    <label class="field"><span>Ключ доступа</span><input id="s_key" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xxxxx-xxxxx-xxxxx" value="${esc(S.key)}"><small>в таблице: меню «WB Аналитика» → «Показать ключ доступа»</small></label>
    <div class="row2"><button type="button" class="btn main" data-act="connect">Проверить и сохранить</button></div>
-   <p class="hint">Нет таблицы? <a href="help.html" target="_blank" style="color:var(--accent)">Инструкция по подключению своего кабинета</a></p></div>
+   <p class="hint">Нет таблицы? <a href="help.html" target="_blank" style="color:var(--accent)">Инструкция по подключению своего кабинета</a> · <a href="help.html#video" target="_blank" style="color:var(--accent)">Видео: как устроено приложение</a></p></div>
   <div class="card"><h2>Налог</h2>
    <div class="row2"><label class="field"><span>Ставка УСН «доходы», %</span><input id="s_tax" class="inp" inputmode="decimal" value="${n1(S.tax*100,2)}"></label>
    <label class="field"><span>С какой суммы</span><select id="s_base" class="inp"><option value="retail" ${S.base!=="pay"?"selected":""}>Реализация (цена продажи)</option><option value="pay" ${S.base==="pay"?"selected":""}>К перечислению от WB</option></select></label></div>
    <p class="hint">Чаще налоговой базой считают всю сумму реализации («WB реализовал товар»), а не то, что WB перечислил. Уточните у своего бухгалтера.</p></div>
+  ${R&&R.alerts?`<div class="card"><h2>Уведомления об остатках</h2><p class="hint">${R.alerts.off?"Выключены.":`Когда товара на складах WB остаётся меньше чем на ${R.alerts.days} дн. или он закончился — ${[R.alerts.tg&&"сообщение в Telegram",R.alerts.mail&&"письмо на "+esc(R.alerts.email)].filter(Boolean).join(" и ")||"никуда не отправляется: включите почту или Telegram"}.`}</p><button type="button" class="btn" data-act="alerts">Настроить уведомления</button></div>`:""}
   <div class="card"><h2>Закуп</h2><p class="hint">Себестоимость 1 шт по каждому артикулу — для расчёта прибыли. Можно внести и прямо в таблице, лист «Закуп».</p><button type="button" class="btn" data-go="cost">Внести закуп списком</button></div>
   <div class="card"><h2>Отчёт в Excel</h2><p class="hint">Файл за выбранный период: сводка с прошлым периодом, товары, остатки, рекламные кампании и показатели по дням.</p><button type="button" class="btn" data-act="xlsx">Скачать отчёт в Excel</button></div>
   <div class="card"><h2>Как считаются показатели</h2><div class="lines" style="font-size:13px;color:var(--muted)">
@@ -322,13 +341,16 @@ function openItem(nm){
    ${L("<b>Выручка (реализация)</b>",rub(o.revenue))}${L("Комиссия и эквайринг WB","−"+rub(x.wb))}${L("К перечислению",rub(o.pay))}${L("Логистика",`−${rub(o.log)} · ${rub(x.logPer)}/шт`)}${L("Хранение, приёмка, штрафы, удержания","−"+rub(x.otherAll))}
    ${L("Реклама",`−${rub(o.adSum)} · ${n1(o.adClicks,0)} кликов, ${n1(o.adOrders,0)} заказов`)}${L("Налог "+pct(S.tax,0),"−"+rub(o.tax))}${L("Закуп",o.cost?`−${rub(o.costSum)} (${n1(o.netQ,0)} × ${rub(o.cost)})`:"не указан","")}
    <div class="ln total"><span>Прибыль</span><span class="${o.profit<0?"neg":"pos"}">${rub(o.profit)}</span></div>${o.netQ>0?L("Прибыль на 1 шт",rub(o.profit/o.netQ)):""}</div>
-   <div class="lines">${L("Остаток FBO / FBS",`${n1(o.fbo,0)} / ${n1(o.fbs,0)} шт`)}${L("Продаётся в день",n1(o.perDay,1))}${L("Хватит на",isFinite(x.days)?n1(x.days,0)+" дн.":"—")}</div>
+   <div class="lines">${L("Остаток FBO / FBS",`${n1(o.fbo,0)} / ${n1(o.fbs,0)} шт`)}${o.perDayWb!=null?L("Заказывают в день (WB / свой склад)",`${n1(o.perDayWb,1)} / ${n1(o.perDayOwn,1)}`)+L("Хватит на складах WB",`<span class="${dCls(x.dWb)}">${o.fbo<=0&&o.perDayWb>0?"закончился":dTxt(x.dWb)}</span>`)+(o.fbs?L("Хватит на своём складе",`<span class="${dCls(x.dOwn)}">${dTxt(x.dOwn)}</span>`):""):L("Продаётся в день",n1(o.perDay,1))+L("Хватит на",isFinite(x.days)?n1(x.days,0)+" дн.":"—")}
+    ${(R.wh&&R.wh[o.nm]||[]).length?`<div class="hint" style="margin-top:4px">По складам WB</div>`+R.wh[o.nm].map(w=>L(esc(w[0]),n1(w[1],0)+" шт")).join(""):""}</div>
+   <div id="i_geo"></div>
    ${o.estRev?`<p class="hint">Из выручки ${rub(o.estRev)} — предварительно, по оперативной статистике: отчёта WB за последние дни ещё нет.</p>`:""}
    <button type="button" class="btn" id="i_x">Закрыть</button>`,s=>{
     s.querySelector("#i_x").onclick=closeSheet;
     itemDays(nm).then(d=>{const c=s.querySelector("#i_ch");if(!c||!c.isConnected)return;
       const sold=d.days.filter(z=>z.ordQ||z.netQ||z.ads).length;
       c.innerHTML=`<h2>По дням <small>${ddmm(d.from)}–${ddmm(d.to)}</small></h2>${sold?chart(d.days,1):`<p class="hint">За период нет заказов и рекламы.</p>`}
+       ${(()=>{const g=s.querySelector("#i_geo"),G=d.geo||[],gt=G.reduce((a,x)=>a+x[1],0);if(g&&G.length)g.innerHTML=`<div class="hint">Откуда заказывают</div>`+bars(G,G[0][1],v=>n1(v,0)+" · "+pct(v/gt,0));return ""})()}
        ${d.campaigns&&d.campaigns.length?`<div class="lines" style="margin-top:4px"><div class="hint">Рекламные кампании этого товара</div>${d.campaigns.map(campRow).join("")}</div>`:""}`})
      .catch(e=>{const c=s.querySelector("#i_ch");if(c)c.innerHTML=`<h2>По дням</h2><p class="hint">${esc(e.message)}</p>`});
     s.querySelector("#i_save").onclick=async()=>{const v=num(s.querySelector("#i_cost").value);try{const d=await gPost({action:"cost",costs:{[nm]:v>0?v:0}});if(!d.ok)throw new Error(errText(d.error));toast("Закуп сохранён");closeSheet();load()}catch(e){toast(e.message)}};
@@ -338,6 +360,30 @@ const IC={};
 async function itemDays(nm){const k=[nm,R.from,R.to,S.tax,S.base,R.at].join("|");if(IC[k])return IC[k];
   const d=await gGet({action:"item",key:S.key,nm,from:R.from,to:R.to,tax:S.tax,base:S.base});
   if(!d.ok)throw new Error(d.error==="Неизвестное действие"?"График по дням появится после обновления скрипта в таблице до версии 3.":errText(d.error));return IC[k]=d}
+function openAlerts(){
+  const A=R&&R.alerts;if(!A){toast("Нужен скрипт таблицы версии 4");return}
+  openSheet(`<h2>Уведомления об остатках</h2>
+   <label class="chk"><input type="checkbox" id="a_on" ${A.off?"":"checked"}> Присылать, когда товар заканчивается на складах WB</label>
+   <label class="field"><span>Порог: запаса меньше чем на, дней</span><input id="a_days" class="inp" inputmode="numeric" value="${A.days}"><small>Считается по заказам за 14 дней. Каждый товар — один раз, пока запас не восстановится; второй раз — если закончился совсем.</small></label>
+   <div class="card" style="padding:12px"><label class="chk"><input type="checkbox" id="a_mail" ${A.mail?"checked":""}> На почту</label>
+    <label class="field"><span>Адрес</span><input id="a_email" class="inp" type="email" placeholder="${esc(A.email||"почта владельца таблицы")}" value=""><small>Пусто — на почту владельца таблицы (${esc(A.email||"")}).</small></label></div>
+   <div class="card" style="padding:12px"><h2 style="font-size:14px">Telegram ${A.tg?`<small class="pos">подключён</small>`:""}</h2>
+    ${A.tg?`<button type="button" class="btn small" id="a_tgoff">Отключить Telegram</button>`:`<ol class="hint" style="padding-left:18px;margin:0">
+     <li>В Telegram найдите <b>@BotFather</b> → «Старт» → отправьте <b>/newbot</b>.</li><li>Придумайте имя боту и адрес, который заканчивается на <b>bot</b>.</li>
+     <li>BotFather пришлёт токен вида <code>123456:AA…</code> — скопируйте его сюда.</li><li>Откройте своего нового бота (ссылка в сообщении BotFather) и нажмите <b>«Старт»</b>.</li><li>Нажмите «Подключить».</li></ol>
+     <input id="a_tok" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="токен бота"><button type="button" class="btn main" id="a_tg">Подключить</button>`}</div>
+   <div class="row2"><button type="button" class="btn main" id="a_save">Сохранить</button><button type="button" class="btn" id="a_test">Проверить сейчас</button></div>
+   <p class="hint" id="a_msg"></p><button type="button" class="btn" id="a_x">Закрыть</button>`,s=>{
+    const msg=t=>{s.querySelector("#a_msg").textContent=t},upd=a=>{if(a){R.alerts=Object.assign(R.alerts,a);try{localStorage.setItem(CK,JSON.stringify(R))}catch(e){}}};
+    const run=async(b,btn,ok)=>{btn.disabled=true;try{const d=await gPost(b);if(!d.ok)throw new Error(d.error==="Неизвестное действие"?"Обновите скрипт таблицы до версии 4.":errText(d.error));upd(d.alerts);msg(ok(d));return d}catch(e){msg(e.message)}finally{btn.disabled=false}};
+    s.querySelector("#a_x").onclick=()=>{closeSheet();render()};
+    s.querySelector("#a_save").onclick=e=>run({action:"alerts",off:!s.querySelector("#a_on").checked,days:num(s.querySelector("#a_days").value),mail:s.querySelector("#a_mail").checked,...(s.querySelector("#a_email").value.trim()?{email:s.querySelector("#a_email").value.trim()}:{})},e.target,()=>"Сохранено.");
+    s.querySelector("#a_test").onclick=e=>run({action:"alertTest"},e.target,d=>d.res.sent&&d.res.sent.length?`Отправлено: ${d.res.sent.join(", ")}.${d.res.count?" Товаров в сообщении: "+d.res.count+".":" Заканчивающихся товаров сейчас нет — пришло проверочное сообщение."}`:"Никуда не отправлено: включите почту или подключите Telegram.");
+    const tg=s.querySelector("#a_tg");if(tg)tg.onclick=async e=>{const t=s.querySelector("#a_tok").value.trim();if(!/^\d+:[\w-]{20,}$/.test(t)){msg("Это не похоже на токен бота. Скопируйте его из сообщения @BotFather целиком.");return}
+      if(await run({action:"alerts",tgToken:t},e.target,()=>"Токен сохранён, ищу чат…")){const d=await run({action:"tgFind"},e.target,d=>`Готово: бот пишет ${d.name}. Проверьте Telegram.`);if(d)setTimeout(openAlerts,1500)}};
+    const off=s.querySelector("#a_tgoff");if(off)off.onclick=async e=>{if(await run({action:"alerts",tgOff:true},e.target,()=>"Telegram отключён."))setTimeout(openAlerts,800)};
+  });
+}
 function openCosts(){
   if(!R){toast("Сначала загрузите данные");return}
   const L=R.items.filter(o=>o.nm).sort((a,b)=>(a.cost?1:0)-(b.cost?1:0)||b.revenue-a.revenue);
@@ -358,6 +404,7 @@ document.addEventListener("click",e=>{
   const a=e.target.closest("[data-act]");if(!a)return;
   if(a.dataset.act==="reload")load();
   if(a.dataset.act==="camps")openCamps();
+  if(a.dataset.act==="alerts")openAlerts();
   if(a.dataset.act==="xlsx")exportXlsx(a);
   if(a.dataset.act==="connect"){(async()=>{S.url=$("#s_url").value.trim();S.key=$("#s_key").value.trim();save();a.disabled=true;a.textContent="Проверяю…";
     try{const p=await gGet({action:"ping"});if(!p||p.app!=="wbstat")throw new Error("По этому адресу не скрипт «WB Аналитика». Проверьте адрес.");const d=await gGet({action:"report",key:S.key,from:range()[0],to:range()[1],tax:S.tax,base:S.base});if(!d.ok)throw new Error(errText(d.error));d.at=Date.now();R=d;try{localStorage.setItem(CK,JSON.stringify(d))}catch(x){}toast("Подключено");S.view="sum";save();render()}
