@@ -9,7 +9,7 @@
  *  - Карточки товаров: название, артикул продавца, фото — раз в сутки.
  * Ключ WB хранится только в свойствах скрипта.
  */
-var VERSION = 4;
+var VERSION = 5;
 var TZ = 'Europe/Moscow';
 var H = {
   stat: 'https://statistics-api.wildberries.ru',
@@ -40,6 +40,7 @@ function onOpen() {
     .addItem('1. Ввести ключ WB', 'menuSetToken')
     .addItem('2. Загрузить историю (90 дней)', 'menuHistory')
     .addItem('Обновить сейчас', 'menuRefresh')
+    .addItem('Обновить карточки (названия и фото)', 'menuCards')
     .addItem('Показать ключ доступа для приложения', 'menuShowKey')
     .addItem('Новый ключ доступа (старый перестанет работать)', 'menuResetKey')
     .addItem('Резервная копия таблицы в Google Диск', 'menuBackup')
@@ -102,12 +103,19 @@ function hourlyRun() {
   try { syncStocks(); setSetting_('errStock', ''); } catch (e) { setSetting_('errStock', e.message); }
   try { syncWh(); setSetting_('errWh', ''); } catch (e) { setSetting_('errWh', e.message); }
   try { alertCheck(); setSetting_('errAlert', ''); } catch (e) { setSetting_('errAlert', e.message); }
+  /* нет карточек (названий и фото) — пробуем снова каждый час */
+  if (!Number(setting_('cardsN') || 0)) { try { syncCards(); } catch (e) { setSetting_('errCards', e.message); } }
 }
 function dailyRun() {
   if (new Date().getDay() === 1) { try { backupRun(); } catch (e) { setSetting_('backupErr', e.message); } }
   try { syncFin(10); setSetting_('errFin', ''); } catch (e) { setSetting_('errFin', e.message); }
   try { syncAds(7); setSetting_('errAds', ''); } catch (e) { setSetting_('errAds', e.message); }
   try { syncCards(); } catch (e) { setSetting_('errCards', e.message); }
+}
+function menuCards() {
+  var ui = SpreadsheetApp.getUi();
+  try { var n = syncCards(); ui.alert(n ? 'Загружено карточек: ' + n + '. Обновите приложение.' : 'WB не вернул ни одной карточки. Проверьте, что ключ создан в этом кабинете и в нём есть категория «Контент».'); }
+  catch (e) { setSetting_('errCards', e.message); ui.alert('Не получилось: ' + e.message); }
 }
 
 /* ================= служебное ================= */
@@ -319,6 +327,15 @@ function syncFin(days) {
   var from = daysAgo_(days), to = day_(new Date()), mode = setting_('finMode') || 'daily';
   var rows = finFetch_(from, to, mode);
   if (!rows.length && mode === 'daily') { Utilities.sleep(61000); rows = finFetch_(from, to, 'weekly'); if (rows.length) { mode = 'weekly'; setSetting_('finMode', 'weekly'); } }
+  else if (rows.length && mode === 'daily') {
+    /* ежедневные отчёты WB есть не за весь период (раньше были только еженедельные) — добираем недельными */
+    var first = rows.reduce(function (m, x) { var d = String(x.rrDate || x.saleDt || '').slice(0, 10); return d && d < m ? d : m; }, to);
+    if (first > daysAgoFrom_(from, -3)) {
+      Utilities.sleep(61000);
+      var wk = finFetch_(from, first, 'weekly').filter(function (x) { var d = String(x.rrDate || x.saleDt || '').slice(0, 10); return d && d < first; });
+      rows = wk.concat(rows); if (wk.length) mode = 'daily+weekly';
+    }
+  }
   if (!rows.length) { setSetting_('finAt', new Date().toISOString()); return { rows: 0, mode: mode }; }
   var map = loadDays_(), agg = finAgg(rows);
   var minD = agg.reduce(function (m, x) { return x.d < m ? x.d : m; }, to);
@@ -332,6 +349,7 @@ function syncFin(days) {
   setSetting_('finAt', new Date().toISOString());
   var last = agg.reduce(function (m, x) { return x.d > m ? x.d : m; }, '');
   if (last > setting_('finLast')) setSetting_('finLast', last);
+  if (!setting_('finFirst') || minD < setting_('finFirst')) setSetting_('finFirst', minD);
   return { rows: rows.length, mode: mode };
 }
 
@@ -592,14 +610,14 @@ function syncCards() {
   var ss = SpreadsheetApp.getActive();
   writeRows_(ss.getSheetByName(SH.goods), ['Артикул WB', 'Артикул продавца', 'Название', 'Предмет', 'Бренд', 'Фото'], cards.map(function (c) {
     var ph = (c.photos || [])[0] || {};
-    return [c.nmID, c.vendorCode || '', c.title || '', c.subjectName || '', c.brand || '', ph.tm || ph.c246x328 || ''];
+    return [c.nmID, c.vendorCode || '', c.title || '', c.subjectName || '', c.brand || '', ph.c246x328 || ph.tm || ph.big || ''];
   }));
   /* лист «Закуп»: добавляем новые артикулы, цены не трогаем */
   var csh = ss.getSheetByName(SH.cost), cur2 = readRows_(csh), have = {};
   cur2.forEach(function (r) { have[Number(r[0])] = 1; });
   cards.forEach(function (c) { if (!have[c.nmID]) cur2.push([c.nmID, c.vendorCode || '', c.title || '', '']); });
   writeRows_(csh, ['Артикул WB', 'Артикул продавца', 'Название', 'Закуп за 1 шт, ₽'], cur2);
-  setSetting_('cardsAt', new Date().toISOString());
+  setSetting_('cardsAt', new Date().toISOString()); setSetting_('cardsN', cards.length); setSetting_('errCards', '');
   return cards.length;
 }
 
@@ -615,7 +633,7 @@ function buildReport(dayRows, goodsRows, costMap, stockRows, from, to, opt) {
   };
   dayRows.forEach(function (r) {
     var d = r[0], nm = r[1]; if (d < from || d > to) return;
-    var o = nmOf(nm), g = function (f) { return num_(r[C[f]]); }, hasFin = opt.finLast ? d <= opt.finLast : g('fin') > 0;
+    var o = nmOf(nm), g = function (f) { return num_(r[C[f]]); }, hasFin = opt.finLast ? d <= opt.finLast && (!opt.finFirst || d >= opt.finFirst) : g('fin') > 0;
     ['ordQ', 'ordSum', 'cancQ', 'saleQ', 'saleSum', 'retQ', 'retSum', 'adSum', 'adViews', 'adClicks', 'adOrders', 'log', 'stor', 'acc', 'pen', 'brakQ', 'brakSum', 'dlv', 'back', 'other']
       .forEach(function (f) { o[f] += g(f); });
     var rev, pay, q;
@@ -677,6 +695,8 @@ function dayList_(from, to) {
   for (var x = new Date(from + 'T12:00:00Z').getTime(); x <= t && out.length < 400; x += 86400000) out.push(new Date(x).toISOString().slice(0, 10));
   return out;
 }
+/** Первый день, за который есть отчёт WB о реализации. До него — оценка по оперативной статистике. */
+function finFirst_(rows) { return rows.reduce(function (m, r) { return num_(r[C.fin]) > 0 && (!m || r[0] < m) ? r[0] : m; }, ''); }
 function readDayRows_() {
   return readRows_(SpreadsheetApp.getActive().getSheetByName(SH.days)).map(function (r) { if (r[0] instanceof Date) r[0] = day_(r[0]); else r[0] = String(r[0]).slice(0, 10); r[1] = Number(r[1]); return r; });
 }
@@ -690,7 +710,7 @@ function doGet(e) {
     if (p.action === 'report') {
       var from = String(p.from || daysAgo_(30)).slice(0, 10), to = String(p.to || day_(new Date())).slice(0, 10), ss = SpreadsheetApp.getActive();
       var rows = readDayRows_(), costs = readCosts_();
-      var opt = { tax: p.tax != null && p.tax !== '' ? num_(p.tax) : 0.07, base: p.base || 'retail', finLast: setting_('finLast') };
+      var opt = { tax: p.tax != null && p.tax !== '' ? num_(p.tax) : 0.07, base: p.base || 'retail', finLast: setting_('finLast'), finFirst: finFirst_(rows) };
       var rep = buildReport(rows, readRows_(ss.getSheetByName(SH.goods)), costs, readRows_(ss.getSheetByName(SH.stock)), from, to, opt);
       /* прошлый период такой же длины — для сравнения */
       var pr = prevRange_(from, to), minD = rows.reduce(function (m, r) { return r[0] && r[0] < m ? r[0] : m; }, '9999');
@@ -714,13 +734,14 @@ function doGet(e) {
       rep.alerts = alertOut_();
       rep.ok = true;
       rep.status = { statAt: setting_('statAt'), finAt: setting_('finAt'), finLast: setting_('finLast'), adsAt: setting_('adsAt'), stockAt: setting_('stockAt'),
-        errStat: setting_('errStat'), errFin: setting_('errFin'), errAds: setting_('errAds'), errStock: setting_('errStock') || setting_('stockErr'), errWh: setting_('errWh'), errAlert: setting_('errAlert'), whAt: setting_('whAt'), alertAt: setting_('alertAt'), finMode: setting_('finMode') || 'daily' };
+        errStat: setting_('errStat'), errFin: setting_('errFin'), errAds: setting_('errAds'), errStock: setting_('errStock') || setting_('stockErr'), errWh: setting_('errWh'), errAlert: setting_('errAlert'), errCards: setting_('errCards'), cardsN: setting_('cardsN'), finFirst: opt.finFirst, whAt: setting_('whAt'), alertAt: setting_('alertAt'), finMode: setting_('finMode') || 'daily' };
       return json_(rep);
     }
     if (p.action === 'item') {
       var nm = Number(p.nm), f2 = String(p.from || daysAgo_(30)).slice(0, 10), t2 = String(p.to || day_(new Date())).slice(0, 10);
-      var o2 = { tax: p.tax != null && p.tax !== '' ? num_(p.tax) : 0.07, base: p.base || 'retail', finLast: setting_('finLast') };
-      var ir = buildReport(readDayRows_().filter(function (r) { return r[1] === nm; }), [], readCosts_(), [], f2, t2, o2), byD = {};
+      var allR = readDayRows_();
+      var o2 = { tax: p.tax != null && p.tax !== '' ? num_(p.tax) : 0.07, base: p.base || 'retail', finLast: setting_('finLast'), finFirst: finFirst_(allR) };
+      var ir = buildReport(allR.filter(function (r) { return r[1] === nm; }), [], readCosts_(), [], f2, t2, o2), byD = {};
       ir.days.forEach(function (x) { byD[x.d] = x; });
       return json_({ ok: true, nm: nm, from: f2, to: t2,
         days: dayList_(f2, t2).map(function (d) { return byD[d] || { d: d, ordSum: 0, revenue: 0, ads: 0, ordQ: 0, netQ: 0, profit: 0 }; }),
